@@ -51,7 +51,12 @@ dependencies = [
     "imagecodecs",
     "yacs",
     "batchgeneratorsv2>=0.2",
-    "einops"
+    "einops",
+    "monai",
+    "mamba_ssm",
+    "edt",
+    "timm",
+    "opencv-python-headless"
 ]
 
 [project.urls]
