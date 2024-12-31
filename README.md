@@ -10,11 +10,11 @@ nnUNet has fantastic documentation if you run into any issues along the way: htt
 
 Install miniconda:
 
-` wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh 
+`wget https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh `
 
-bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda3 
+`bash Miniconda3-latest-Linux-x86_64.sh -b -p $HOME/miniconda3 `
 
-source $HOME/miniconda3/bin/activate ` 
+`source $HOME/miniconda3/bin/activate`
 
 Install torch:
 
@@ -46,7 +46,7 @@ The ensemble used for our final trace was created by taking the softmax predicti
 Threshold these using otsu's method: 
 `python apply_thresholds.py`
 
-Combine to a zarr"
+Combine to a zarr
 `python grids_to_zarr.py`
 
 Convert to an ome-zarr (thanks chuck! more info here https://github.com/KhartesViewer/scroll2zarr/blob/main/README.md#user-guide-for-zarr_to_ome):
