@@ -5,6 +5,7 @@ from nnunetv2.training.loss.robust_ce_loss import RobustCrossEntropyLoss, TopKLo
 from nnunetv2.training.loss.cldice import soft_cldice
 from nnunetv2.training.loss.cldice_legacy import soft_cldice as soft_cldice_legacy
 from nnunetv2.training.loss.cldice_fast import soft_cldice as soft_cldice_fast
+from nnunetv2.training.loss.rmi_loss import RMILoss
 from nnunetv2.utilities.helpers import softmax_helper_dim1
 from nnunetv2.utilities.nd_softmax import softmax_helper
 from nnunetv2.utilities.tensor_utilities import sum_tensor
@@ -408,3 +409,33 @@ class CL_and_DC_and_BCE_loss(nn.Module):
         result = self.weight_ce * ce_loss + self.weight_dice * dc_loss + self.weight_cl * cl_loss
         return result
 
+class RMI_DC_and_CE_loss(nn.Module):
+    def __init__(self, soft_dice_kwargs, ce_kwargs, rmi_kwargs, weight_ce=0.2, weight_dice=0.4, weight_rmi=0.4,
+                 ignore_label=None, dice_class=MemoryEfficientSoftDiceLoss):
+        super(RMI_DC_and_CE_loss, self).__init__()
+        if ignore_label is not None:
+            ce_kwargs['ignore_index'] = ignore_label
+
+        self.weight_dice = weight_dice
+        self.weight_ce = weight_ce
+        self.weight_rmi = weight_rmi
+        self.ignore_label = ignore_label
+
+        self.ce = RobustCrossEntropyLoss(**ce_kwargs)
+        self.dc = dice_class(apply_nonlin=softmax_helper_dim1, **soft_dice_kwargs)
+        self.rmi = RMILoss(**rmi_kwargs)
+
+    def forward(self, net_output: torch.Tensor, target: torch.Tensor):
+        if self.ignore_label is not None:
+            mask = target != self.ignore_label
+            target_dice = torch.where(mask, target, 0)
+            num_fg = mask.sum()
+        else:
+            target_dice = target
+            mask = None
+
+        dc_loss = self.dc(net_output, target_dice, loss_mask=mask)
+        ce_loss = self.ce(net_output, target[:, 0])
+        rmi_loss = self.rmi(net_output, target)
+
+        return self.weight_ce * ce_loss + self.weight_dice * dc_loss + self.weight_rmi * rmi_loss

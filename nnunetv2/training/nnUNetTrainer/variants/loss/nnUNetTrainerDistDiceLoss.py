@@ -65,6 +65,9 @@ class nnUNetTrainerDistDiceLoss(nnUNetTrainer):
                  device: torch.device = torch.device('cuda')):
         super().__init__(plans, configuration, fold, dataset_json, unpack_dataset, device)
         self.dataset_class = DistanceTransformDataset  # Use the custom dataset class
+
+
+
         
     def _build_loss(self):
         loss = MemoryEfficientDistDiceLoss(**{'batch_dice': self.configuration_manager.batch_dice,
@@ -219,6 +222,12 @@ class nnUNetTrainerDistDiceLoss(nnUNetTrainer):
 
         if do_dummy_2d_data_aug:
             transforms.append(Convert2DTo3DDistTransform())
+
+        transforms.append(RandomTransform(
+            TransposeAxesTransform(
+                allowed_axes={0, 1, 2}
+            ), apply_probability=0.3
+        ))
 
         transforms.append(RandomTransform(
             GaussianNoiseTransform(
@@ -510,6 +519,19 @@ class nnUNetTrainerDistDiceCELoss(nnUNetTrainerDistDiceLoss):
         return loss
 
 class nnUNetTrainerDistDiceCELossExtraDA(nnUNetTrainerDistDiceCELoss):
+
+    def configure_rotation_dummyDA_mirroring_and_inital_patch_size(self):
+        rotation_for_DA, do_dummy_2d_data_aug, initial_patch_size, mirror_axes = \
+            super().configure_rotation_dummyDA_mirroring_and_inital_patch_size()
+        patch_size = self.configuration_manager.patch_size
+        dim = len(patch_size)
+        if dim == 2:
+            mirror_axes = (0, )
+        else:
+            mirror_axes = (0, 1)
+        self.inference_allowed_mirroring_axes = mirror_axes
+        return rotation_for_DA, do_dummy_2d_data_aug, initial_patch_size, mirror_axes
+
     @staticmethod
     def get_training_transforms(
             patch_size: Union[np.ndarray, Tuple[int]],
@@ -533,15 +555,29 @@ class nnUNetTrainerDistDiceCELossExtraDA(nnUNetTrainerDistDiceCELoss):
             ignore_axes = None
         transforms.append(
             SpatialDistTransform(
-                patch_size_spatial, patch_center_dist_from_border=0, random_crop=False, p_elastic_deform=.3,
-                p_rotation=0.2, elastic_deform_magnitude=(20, 75),
-                rotation=rotation_for_DA, p_scaling=0.2, scaling=(0.7, 1.4), p_synchronize_scaling_across_axes=1,
+                patch_size_spatial,
+                patch_center_dist_from_border=0,
+                random_crop=False,
+                p_elastic_deform=.3,
+                elastic_deform_scale=(0., 0.4),
+                elastic_deform_magnitude=(20, 100),
+                p_rotation=0.2,
+                rotation=rotation_for_DA,
+                p_scaling=0.2,
+                scaling=(0.7, 1.4),
+                p_synchronize_scaling_across_axes=1,
                 bg_style_seg_sampling=False  # , mode_seg='nearest'
             )
         )
 
         if do_dummy_2d_data_aug:
             transforms.append(Convert2DTo3DDistTransform())
+
+        transforms.append(RandomTransform(
+            TransposeAxesTransform(
+                allowed_axes={0, 1, 2}
+            ), apply_probability=0.3
+        ))
 
         transforms.append(RandomTransform(
             BlankRectangleTransform(

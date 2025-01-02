@@ -1,0 +1,4 @@
+
+*.pyc
+/nnunetv2.egg-info
+/.idea
