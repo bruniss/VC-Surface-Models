@@ -1,3 +1,5 @@
+# this is very heavily borrowed from discord user @Mojonero, who kindly shared his s2 starter here: https://discord.com/channels/1079907749569237093/1204133327083147264/1204133327083147264
+
 import zarr
 import torch
 import numpy as np
