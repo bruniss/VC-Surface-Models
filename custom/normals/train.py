@@ -79,7 +79,7 @@ def train():
     sheet_criterion = DiceCELoss(label_smoothing=0.1) # dice and cross-entropy for sheet
     normal_criterion = nn.MSELoss() # mean squared error for normals (might not be best choice idk yet)
     affinity_criterion = nn.BCEWithLogitsLoss() # i want to experiment with this, but for now this will work
-    w_sheet, w_normal, w_affinity = 1.0, 1.0, 1.0 # equally weighting all for now
+    w_sheet, w_normal, w_affinity = 1.0, 0.6, 0.8
 
     # ---- optimizer seutp, scaler setup, splits and batch setup ---- #
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
@@ -109,10 +109,10 @@ def train():
     dataloader = DataLoader(dataset, batch_size=batch_size, sampler=SubsetRandomSampler(train_indices),
                             pin_memory=True, num_workers=4)
     val_dataloader = DataLoader(dataset, batch_size=1, sampler=SubsetRandomSampler(val_indices),
-                                pin_memory=True, num_workers=1)
+                                pin_memory=True, num_workers=4)
 
     # set max number iters per epoch (this dataset is gigantic and i dont want to have 6 hour epoch times)
-    max_steps_per_epoch = 250
+    max_steps_per_epoch = 400
     max_val_steps_per_epoch = 25
 
     # ---- training! ----- #
