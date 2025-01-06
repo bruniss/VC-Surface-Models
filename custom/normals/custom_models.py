@@ -1,3 +1,5 @@
+# this is very heavily borrowed from discord user @Mojonero, who kindly shared his s2 starter here: https://discord.com/channels/1079907749569237093/1204133327083147264/1204133327083147264
+
 from pytorch3dunet.unet3d.model import ResidualUNetSE3D, MultiTaskResidualUNetSE3D
 from pytorch3dunet.unet3d.buildingblocks import create_decoders, ResNetBlockSE
 from pytorch3dunet.augment.transforms import (
