@@ -19,6 +19,7 @@ import tifffile
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
+from losses import normal_cosine_loss
 
 def train():
 
@@ -56,13 +57,13 @@ def train():
         volume_path=Path('/mnt/raid_hdd/scrolls/s1/s1.zarr/0.zarr'),
         sheet_label_path=Path('/mnt/raid_nvme/datasets/1-voxel-sheet_slices-closed.zarr/0.zarr'),
         normals_path=Path('/home/sean/Documents/GitHub/VC-Surface-Models/custom/normals.zarr'),
-        patch_size=(128, 128, 128),
+        patch_size=(64, 192, 192),
         min_labeled_ratio=0.1,
         xy_offsets=[1, 3],
         z_offsets=[1, 3],
         transforms_list=transforms_list,
         use_cache=True,
-        cache_file=Path('/home/sean/Documents/GitHub/VC-Surface-Models/custom/normals/valid_patch_cache_128.json')
+        cache_file=Path('/home/sean/Documents/GitHub/VC-Surface-Models/custom/normals/valid_patch_cache64_192_192.json')
     )
 
     print(f"Dataset size: {len(dataset)}")
@@ -77,9 +78,10 @@ def train():
 
     # --- losses ---- #
     sheet_criterion = DiceCELoss(label_smoothing=0.1) # dice and cross-entropy for sheet
-    normal_criterion = nn.MSELoss() # mean squared error for normals (might not be best choice idk yet)
+    # normal_criterion = nn.MSELoss() # mean squared error for normals (might not be best choice idk yet)
+    normal_criterion = normal_cosine_loss
     affinity_criterion = nn.BCEWithLogitsLoss() # i want to experiment with this, but for now this will work
-    w_sheet, w_normal, w_affinity = 1.0, 0.6, 0.8
+    w_sheet, w_normal, w_affinity = 0.5, 0.3, 0.2
 
     # ---- optimizer seutp, scaler setup, splits and batch setup ---- #
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
@@ -97,10 +99,10 @@ def train():
     train_split = 0.8
     split = int(np.floor(train_split * dataset_size))
     train_indices, val_indices = indices[:split], indices[split:]
-    batch_size = 2
+    batch_size = 1
 
     # apply gradient accumulation
-    grad_accumulate_n = 32
+    grad_accumulate_n = 16
 
     scaler = torch.cuda.amp.GradScaler()
 

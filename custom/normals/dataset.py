@@ -13,6 +13,18 @@ from tqdm import tqdm
 import multiprocessing
 import json
 
+def ct_normalize(volume, clip_min, clip_max, global_mean, global_std):
+    """
+    Mimics nnU-Net CT normalization:
+      1) Clip to [clip_min, clip_max],
+      2) Subtract mean,
+      3) Divide by std.
+    """
+    volume = volume.astype(np.float32)
+    volume = np.clip(volume, clip_min, clip_max)
+    volume = (volume - global_mean) / global_std
+    return volume
+
 class TargetedTransform:
     """Wrapper for transforms that only applies them to specified data types"""
     def __init__(self, transform, targets):
@@ -398,12 +410,14 @@ class ZarrSegmentationDataset3D(Dataset):
             volume_data = self.volume_array[volume_idx][patch_slice]
 
         images = volume_data.astype(np.float32)
-        if volume_data.dtype == np.uint8:
-            images /= 255.0
-        elif volume_data.dtype == np.uint16:
-            images /= 65535.0
-
-        images = self.standardizer(images)
+        images /= 257.0  # now in [0..255]
+        images = ct_normalize(
+            images,
+            clip_min=43.0,
+            clip_max=240.0,
+            global_mean=129.9852752685547,
+            global_std=44.020145416259766
+        )
 
         # --- sheet data  ---
         if self._is_single_volume:
