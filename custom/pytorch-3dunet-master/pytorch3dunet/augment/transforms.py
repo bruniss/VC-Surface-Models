@@ -21,74 +21,146 @@ class Compose(object):
             m = t(m)
         return m
 
+def reorder_channels(m, reorder_dict):
+    """
+    Reorders (or swaps) channels in 'm' according to 'reorder_dict'.
+    m has shape (C, D, H, W).
+    reorder_dict is a mapping old_channel -> new_channel.
+    """
+    new_m = np.zeros_like(m)
+    for old_ch, new_ch in reorder_dict.items():
+        new_m[new_ch] = m[old_ch]
+    return new_m
 
 class RandomFlip:
     """
-    Modified to handle normal vectors alongside the main data
+    Flip along the spatial dimensions. If shape=(C,D,H,W), axes=(1,2,3).
+    If shape=(D,H,W), axes=(0,1,2).
+
+    Optionally:
+      - is_normals: negate the appropriate normal channel(s)
+      - is_affinities: swap the +/- offset channels
     """
-    def __init__(self, random_state, axis_prob=0.5, is_normals=False, **kwargs):
-        assert random_state is not None, 'RandomState cannot be None'
+    def __init__(self,
+                 random_state,
+                 axis_prob=0.5,
+                 is_normals=False,
+                 is_affinities=False,
+                 **kwargs):
         self.random_state = random_state
-        self.axes = (0, 1, 2)
         self.axis_prob = axis_prob
-        self.is_normals = is_normals  # Flag to indicate if this is normal vector data
+        self.is_normals = is_normals
+        self.is_affinities = is_affinities
 
     def __call__(self, m):
-        assert m.ndim in [3, 4], 'Supports only 3D (DxHxW) or 4D (CxDxHxW) images'
+        # Decide which axes are "spatial" based on ndim
+        if m.ndim == 4:
+            # shape=(C,D,H,W) => spatial axes are (1,2,3)
+            spatial_axes = (1, 2, 3)
+        elif m.ndim == 3:
+            # shape=(D,H,W) => spatial axes are (0,1,2)
+            spatial_axes = (0, 1, 2)
+        else:
+            raise ValueError(f"Unsupported ndim={m.ndim}. Expect 3 or 4.")
 
-        for axis in self.axes:
-            if self.random_state.uniform() > self.axis_prob:
-                if m.ndim == 3:
-                    m = np.flip(m, axis)
-                    if self.is_normals:
-                        m[..., axis] *= -1  # Flip corresponding normal component
+        for axis in spatial_axes:
+            if self.random_state.uniform() < self.axis_prob:
+                if m.ndim == 4:
+
+                    m = np.flip(m, axis=axis)
+
+                    # If we have 3-channel normals (nx,ny,nz) in shape=(3,D,H,W):
+                    if self.is_normals and m.shape[0] == 3:
+                        # Map which normal channel to negate for each flip axis
+                        # If axis=1 => flipping along "D" => negate channel=2 (nz)
+                        # If axis=2 => flipping along "H" => negate channel=1 (ny)
+                        # If axis=3 => flipping along "W" => negate channel=0 (nx)
+                        flip_map_normals = {1: 2, 2: 1, 3: 0}
+                        ch = flip_map_normals[axis]
+                        m[ch] *= -1.0
+
+                    # If we have 6-channel affinity in shape=(6,D,H,W):
+                    if self.is_affinities and m.shape[0] == 6:
+                        # Suppose channels = {0:+x, 1:-x, 2:+y, 3:-y, 4:+z, 5:-z}
+                        if axis == 3:
+                            # flipping along W => swap +x <-> -x
+                            swap_dict = {0:1, 1:0, 2:2, 3:3, 4:4, 5:5}
+                            m = reorder_channels(m, swap_dict)
+                        elif axis == 2:
+                            # flipping along H => swap +y <-> -y
+                            swap_dict = {0:0, 1:1, 2:3, 3:2, 4:4, 5:5}
+                            m = reorder_channels(m, swap_dict)
+                        elif axis == 1:
+                            # flipping along D => swap +z <-> -z
+                            swap_dict = {0:0, 1:1, 2:2, 3:3, 4:5, 5:4}
+                            m = reorder_channels(m, swap_dict)
+
                 else:
-                    channels = [np.flip(m[c], axis) for c in range(m.shape[0])]
-                    m = np.stack(channels, axis=0)
-                    if self.is_normals:
-                        m[axis] *= -1  # Flip corresponding normal component
+                    # m.ndim==3 => just flip directly
+                    m = np.flip(m, axis=axis)
 
         return m
-
 
 class RandomRotate90:
-    """
-    Modified to handle normal vectors alongside the main data
-    """
-
-    def __init__(self, random_state, is_normals=False, **kwargs):
+    def __init__(self, random_state, execution_probability=0.3, is_normals=False, is_affinities=False):
         self.random_state = random_state
-        self.axis = (1, 2)  # Always rotate around z-axis
+        self.execution_probability = execution_probability
         self.is_normals = is_normals
+        self.is_affinities = is_affinities
 
     def __call__(self, m):
-        assert m.ndim in [3, 4], 'Supports only 3D (DxHxW) or 4D (CxDxHxW) images'
 
-        # pick number of rotations at random
-        k = self.random_state.randint(0, 4)
+        if self.random_state.uniform() > self.execution_probability:
+            return m
 
-        if k > 0:  # Only apply if there's actual rotation
-            if m.ndim == 3:
-                m = np.rot90(m, k, self.axis)
-                if self.is_normals:
-                    if k == 1:  # 90 degrees
-                        m = m[..., [1, 0, 2]] * np.array([[-1, 1, 1]])
-                    elif k == 2:  # 180 degrees
-                        m = m * np.array([[-1, -1, 1]])
-                    elif k == 3:  # 270 degrees
-                        m = m[..., [1, 0, 2]] * np.array([[1, -1, 1]])
-            else:
-                channels = [np.rot90(m[c], k, self.axis) for c in range(m.shape[0])]
-                m = np.stack(channels, axis=0)
-                if self.is_normals:
-                    if k == 1:  # 90 degrees
-                        m = m[[1, 0, 2]] * np.array([-1, 1, 1])[:, None, None, None]
-                    elif k == 2:  # 180 degrees
-                        m = m * np.array([-1, -1, 1])[:, None, None, None]
-                    elif k == 3:  # 270 degrees
-                        m = m[[1, 0, 2]] * np.array([1, -1, 1])[:, None, None, None]
+        k = self.random_state.randint(0, 4)  # 0, 1, 2, or 3 times 90° rotation
+
+        if k == 0:
+            return m
+
+        if m.ndim == 4:
+            # shape = (C, D, H, W): rotate around the last two dims => axes=(2,3)
+            m = np.rot90(m, k, axes=(2, 3))
+
+            # After rotation, reorder channels if needed:
+            if self.is_normals and m.shape[0] == 3:
+                # Standard z-axis rotation rules:
+                # k=1 => (nx, ny) -> (-ny, nx)
+                # k=2 => (nx, ny) -> (-nx, -ny)
+                # k=3 => (nx, ny) -> (ny, -nx)
+                if k == 1:
+                    # swap x & y, then negate the new x
+                    m = m[[1, 0, 2]]  # reorder channels
+                    m[0] *= -1.0      # was m[1] originally
+                elif k == 2:
+                    m[0] *= -1.0
+                    m[1] *= -1.0
+                elif k == 3:
+                    m = m[[1, 0, 2]]
+                    m[1] *= -1.0
+
+            if self.is_affinities and m.shape[0] == 6:
+                # Suppose the channels are {0:+x, 1:-x, 2:+y, 3:-y, 4:+z, 5:-z}
+                # rotating in (H,W) ~ rotating in the xy-plane => apply channel swaps:
+                # For example, here’s one typical way:
+                aff_rot90z = {
+                    1: {0:3, 1:2, 2:1, 3:0, 4:4, 5:5},  # 90°
+                    2: {0:1, 1:0, 2:3, 3:2, 4:4, 5:5},  # 180°
+                    3: {0:2, 1:3, 2:0, 3:1, 4:4, 5:5},  # 270°
+                }
+                reorder_dict = aff_rot90z[k]
+                m = reorder_channels(m, reorder_dict)
+
+        elif m.ndim == 3:
+            # shape = (D, H, W): rotate around last two dims => axes=(1,2)
+            m = np.rot90(m, k, axes=(1, 2))
+
+        else:
+            raise ValueError(f"Unsupported ndim={m.ndim}. Expect 3 or 4.")
 
         return m
+
+
 
 
 class RandomRotate:
@@ -311,15 +383,53 @@ class AbstractLabelToBoundary:
 
     @staticmethod
     def create_kernel(axis, offset):
-        # create conv kernel
-        k_size = offset + 1
-        k = np.zeros((1, 1, k_size), dtype=np.int32)
-        k[0, 0, 0] = 1
-        k[0, 0, offset] = -1
-        return np.transpose(k, axis)
+        """
+        Create a 3D convolution kernel for an integer offset along a given axis
+        and return it transposed according to 'axis'.
 
-    def get_kernels(self):
-        raise NotImplementedError
+        The original code assumed offset was positive, creating an array of shape
+        (1,1, offset+1). Now we handle negative offsets as well by using abs(offset).
+
+        If offset > 0:
+            - place +1 at index=0
+            - place -1 at index=offset
+        If offset < 0:
+            - place +1 at index=abs(offset)
+            - place -1 at index=0
+
+        Then we transpose it so that the dimension of size `abs(offset)+1` goes
+        into the specified axis position, matching the original logic.
+
+        :param axis: A tuple like (0,1,2) or (2,0,1) indicating how to transpose
+                     the kernel to place the 'offset' dimension along X, Y, or Z.
+        :param offset: Integer offset, can be positive or negative.
+        :return: np.ndarray of shape (kD, kH, kW) with +1 and -1 placed accordingly.
+        """
+        abs_off = abs(offset)
+        k_size = abs_off + 1  # total size along the 'offset' dimension
+
+        # Create a minimal kernel of shape (1,1,k_size),
+        # which we'll then transpose to the correct axis.
+        k = np.zeros((1, 1, k_size), dtype=np.int32)
+
+        if offset >= 0:
+            # offset >= 0 => put +1 at index=0, -1 at index=offset
+            # e.g. offset=3 => shape=(1,1,4); k[0,0,0]=+1, k[0,0,3]=-1
+            k[0, 0, 0] = 1
+            k[0, 0, offset] = -1
+        else:
+            # offset < 0 => put +1 at index=abs_off, -1 at index=0
+            # e.g. offset=-2 => shape=(1,1,3); k[0,0,2]=+1, k[0,0,0]=-1
+            k[0, 0, abs_off] = 1
+            k[0, 0, 0] = -1
+
+        # Now transpose so that the dimension of size k_size
+        # goes to the axis indicated by 'axis'
+        #
+        # Example: if axis=(2,0,1), we want the dimension of size k_size
+        # to end up in dimension 2 (the 'Z' dimension).
+        # np.transpose(k, axis) reorders k's axes from (0,1,2) to (axis[0], axis[1], axis[2]).
+        return np.transpose(k, axis)
 
 
 class StandardLabelToBoundary:
@@ -412,35 +522,64 @@ class RandomLabelToAffinities(AbstractLabelToBoundary):
 
 from cc3d import connected_components  # Using connected-components-3d library for better performance
 
-
 class LabelToAffinities(AbstractLabelToBoundary):
     """
     First converts binary mask to instance labels using connected components,
     then converts to affinity maps using the instance labels.
+    Generates both + and - offsets for x, y, z in the exact order:
+        0 => +x,  1 => -x,
+        2 => +y,  3 => -y,
+        4 => +z,  5 => -z
+    for each offset in offsets / z_offsets.
     """
 
-    def __init__(self, offsets, ignore_index=None, append_label=False, aggregate_affinities=False, z_offsets=None,
-                 **kwargs):
-        super().__init__(ignore_index=ignore_index, append_label=append_label,
+    # We’ll keep AXES_TRANSPOSE for reference, but won’t rely on it
+    AXES_TRANSPOSE = [
+        (0, 1, 2),  # X
+        (0, 2, 1),  # Y
+        (2, 0, 1)   # Z
+    ]
+
+    def __init__(self, offsets, ignore_index=None, append_label=False,
+                 aggregate_affinities=False, z_offsets=None, **kwargs):
+
+        super().__init__(ignore_index=ignore_index,
+                         append_label=append_label,
                          aggregate_affinities=aggregate_affinities)
 
-        assert isinstance(offsets, list) or isinstance(offsets, tuple), 'offsets must be a list or a tuple'
-        assert all(a > 0 for a in offsets), "'offsets must be positive"
+        assert isinstance(offsets, (list, tuple)), "'offsets' must be a list or tuple"
+        assert all(a > 0 for a in offsets), "'offsets' must be positive"
         assert len(set(offsets)) == len(offsets), "'offsets' must be unique"
+
+        # If z_offsets not provided, reuse the xy offsets
         if z_offsets is not None:
-            assert len(offsets) == len(z_offsets), 'z_offsets length must be the same as the length of offsets'
+            assert len(offsets) == len(z_offsets), (
+                "z_offsets length must match offsets length"
+            )
         else:
             z_offsets = list(offsets)
+
         self.z_offsets = z_offsets
 
+        # Build kernels in the order:
+        #   +x, -x, +y, -y, +z, -z
+        # for each offset in offsets[] and z_offsets[].
         self.kernels = []
-        # create kernel for every axis-offset pair
         for xy_offset, z_offset in zip(offsets, z_offsets):
-            for axis_ind, axis in enumerate(self.AXES_TRANSPOSE):
-                final_offset = xy_offset
-                if axis_ind == 2:
-                    final_offset = z_offset
-                self.kernels.append(self.create_kernel(axis, final_offset))
+            # +x
+            self.kernels.append(self.create_kernel((0,1,2), xy_offset))
+            # -x
+            self.kernels.append(self.create_kernel((0,1,2), -xy_offset))
+
+            # +y
+            self.kernels.append(self.create_kernel((0,2,1), xy_offset))
+            # -y
+            self.kernels.append(self.create_kernel((0,2,1), -xy_offset))
+
+            # +z
+            self.kernels.append(self.create_kernel((2,0,1), z_offset))
+            # -z
+            self.kernels.append(self.create_kernel((2,0,1), -z_offset))
 
     def __call__(self, m):
         """
@@ -449,7 +588,6 @@ class LabelToAffinities(AbstractLabelToBoundary):
         assert m.ndim == 3, "Input must be 3D"
 
         # Convert binary mask to instance labels using connected components
-        # Note: connected_components expects input to be binary
         binary_mask = (m > 0).astype(np.uint32)
         instance_labels = connected_components(binary_mask)
 
@@ -458,6 +596,7 @@ class LabelToAffinities(AbstractLabelToBoundary):
 
     def get_kernels(self):
         return self.kernels
+
 
 class LabelToZAffinities(AbstractLabelToBoundary):
     """
@@ -681,12 +820,7 @@ class RicianNoiseTransform:
                 return torch.sqrt((m + noise1) ** 2 + noise2 ** 2)
         return m
 
-
 class BlankRectangleTransform:
-    """
-    Adds random blank rectangles to images.
-    """
-
     def __init__(self, random_state,
                  min_size=(10, 10, 10),
                  max_size=(30, 30, 30),
@@ -696,8 +830,7 @@ class BlankRectangleTransform:
         self.random_state = random_state
         self.min_size = np.array(min_size)
         self.max_size = np.array(max_size)
-        self.num_rectangles = num_rectangles if isinstance(num_rectangles, tuple) else (
-        num_rectangles, num_rectangles + 1)
+        self.num_rectangles = num_rectangles if isinstance(num_rectangles, tuple) else (num_rectangles, num_rectangles + 1)
         self.value_range = value_range
         self.execution_probability = execution_probability
 
@@ -711,28 +844,46 @@ class BlankRectangleTransform:
             # Number of rectangles to add
             n_rect = self.random_state.randint(self.num_rectangles[0], self.num_rectangles[1])
 
-            for _ in range(n_rect):
-                # Random size for each dimension
-                size = self.random_state.randint(self.min_size, self.max_size + 1)
+            # Decide how to interpret shape
+            # If m.ndim=4 => (C, D, H, W); we want (D, H, W) for indexing
+            # If m.ndim=3 => (D, H, W)
+            if m.ndim == 4:
+                shape_for_op = m.shape[1:]   # skip channel dimension
+            else:
+                shape_for_op = m.shape       # use entire shape
 
-                # Random position
-                pos = [self.random_state.randint(0, max(m.shape[i + 1] - size[i], 1))
+            size = self.random_state.randint(self.min_size, self.max_size + 1)
+
+            for _ in range(n_rect):
+                # For 3D patching => shape_for_op has length 3 => (D,H,W)
+                # shape_for_op[i] - size[i]
+                pos = [self.random_state.randint(0, max(shape_for_op[i] - size[i], 1))
                        for i in range(len(size))]
 
                 # Random intensity value
                 value = self.random_state.uniform(*self.value_range)
 
-                # Apply rectangle
-                slices = tuple([slice(None)] +
-                               [slice(p, p + s) for p, s in zip(pos, size)])
+                # Construct slices
+                if m.ndim == 4:
+                    # first dimension is channels => slice(None)
+                    slices = tuple([slice(None)] +
+                                   [slice(p, p + s) for p, s in zip(pos, size)])
+                else:
+                    # No channel dimension
+                    slices = tuple([slice(p, p + s) for p, s in zip(pos, size)])
 
+                # Apply rectangle
                 if isinstance(m, np.ndarray):
                     result[slices] = value
                 else:
-                    result[slices] = torch.tensor(value, device=result.device, dtype=result.dtype)
+                    import torch
+                    result[slices] = torch.tensor(value,
+                                                  device=result.device,
+                                                  dtype=result.dtype)
 
             return result
         return m
+
 
 
 class ContrastTransform:

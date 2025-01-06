@@ -262,7 +262,8 @@ class MultiTaskResidualUNetSE3D(ResidualUNetSE3D):
 
         # Calculate total affinity channels: 3 directions per offset
         if affinity_channels is None:
-            affinity_channels = 3 * len(xy_offsets)  # 3 directions (x,y,z) per offset
+            # 6 directions (±x, ±y, ±z) per offset
+            affinity_channels = 6 * len(xy_offsets)
 
         # Initialize parent ResidualUNetSE3D
         super().__init__(
@@ -291,6 +292,8 @@ class MultiTaskResidualUNetSE3D(ResidualUNetSE3D):
             'normals': normal_channels,
             'affinities': affinity_channels
         }
+
+        self.f_maps  = f_maps
 
         for task_name, out_channels in out_channels_dict.items():
             # Create decoder path
