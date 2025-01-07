@@ -1,4 +1,4 @@
-
+from nnunetv2.training.lr_scheduler.polylr import PolyLRScheduler
 from pytorch3dunet.unet3d.model import ResidualUNetSE3D, MultiTaskResidualUNetSE3D
 from pytorch3dunet.unet3d.buildingblocks import create_decoders, ResNetBlockSE
 from pytorch3dunet.augment.transforms import (
@@ -9,7 +9,8 @@ from torch.utils.data import DataLoader, SubsetRandomSampler
 from tqdm import tqdm
 import torch.nn as nn
 import torch
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, CosineAnnealingLR
+from torch.optim import AdamW
 import numpy as np
 from dataset import ZarrSegmentationDataset3D
 from pathlib import Path
@@ -19,7 +20,10 @@ import tifffile
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
-from losses import normal_cosine_loss
+from losses import normal_cosine_loss, GeneralizedDiceLoss
+from pytorch3dunet.unet3d.losses import BCEDiceLoss
+import os
+
 
 def train():
 
@@ -63,7 +67,7 @@ def train():
         z_offsets=[1, 3],
         transforms_list=transforms_list,
         use_cache=True,
-        cache_file=Path('/home/sean/Documents/GitHub/VC-Surface-Models/custom/normals/valid_patch_cache64_192_192.json')
+        cache_file=Path('/home/sean/Documents/GitHub/VC-Surface-Models/custom/normals/valid_patch_cache64_192_192_boundary_fill.json')
     )
 
     print(f"Dataset size: {len(dataset)}")
@@ -73,24 +77,42 @@ def train():
     print(f"patch_size: {dataset.patch_size}")
 
     device = torch.device('cuda')
+    model = torch.compile(model)
     model = model.to(device)
     model_name = 'SheetNormAffinity'
 
     # --- losses ---- #
-    sheet_criterion = DiceCELoss(label_smoothing=0.1) # dice and cross-entropy for sheet
+    sheet_criterion = BCEDiceLoss(alpha=0.4, beta=0.6) # dice and cross-entropy for sheet
     # normal_criterion = nn.MSELoss() # mean squared error for normals (might not be best choice idk yet)
     normal_criterion = normal_cosine_loss
-    affinity_criterion = nn.BCEWithLogitsLoss() # i want to experiment with this, but for now this will work
-    w_sheet, w_normal, w_affinity = 0.5, 0.3, 0.2
+    # affinity_criterion = nn.BCEWithLogitsLoss() # i want to experiment with this, but for now this will work
+    affinity_criterion = GeneralizedDiceLoss(normalization='sigmoid')
+    w_sheet, w_normal, w_affinity = 1, 1, 1
 
-    # ---- optimizer seutp, scaler setup, splits and batch setup ---- #
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    scheduler = ReduceLROnPlateau(optimizer,
-                                  mode='min',
-                                  factor=0.7,
-                                  patience=30,
-                                  min_lr = 1e-6,
-                                  verbose=True)
+    # ---- optimizer seutp, scheduler setup, splits and batch setup ---- #
+    max_steps_per_epoch = 500
+    max_val_steps_per_epoch = 25
+    max_epoch = 500
+    initial_lr = 1e-3
+    weight_decay = 1e-4
+    ckpt_out_base = '/mnt/raid_hdd/models/normals/checkpoints'
+    os.makedirs(ckpt_out_base, exist_ok=True)
+    checkpoint_path = "/mnt/raid_hdd/models/normals/checkpoints/SheetNormAffinity_50.pth"
+
+    optimizer = AdamW(
+        model.parameters(),
+        lr=initial_lr,
+        weight_decay=weight_decay
+    )
+
+    # optimizer = torch.optim.SGD(model.parameters(), lr=initial_lr,
+    #                            momentum=0.99,
+    #                            #weight_decay=weight_decay,
+    #                            nesterov=True)
+
+    scheduler = CosineAnnealingLR(optimizer,
+                                  T_max=max_epoch,
+                                  eta_min=0)
 
     dataset_size = len(dataset)
     indices = list(range(dataset_size))
@@ -99,7 +121,7 @@ def train():
     train_split = 0.8
     split = int(np.floor(train_split * dataset_size))
     train_indices, val_indices = indices[:split], indices[split:]
-    batch_size = 1
+    batch_size = 2
 
     # apply gradient accumulation
     grad_accumulate_n = 16
@@ -113,12 +135,20 @@ def train():
     val_dataloader = DataLoader(dataset, batch_size=1, sampler=SubsetRandomSampler(val_indices),
                                 pin_memory=True, num_workers=4)
 
-    # set max number iters per epoch (this dataset is gigantic and i dont want to have 6 hour epoch times)
-    max_steps_per_epoch = 400
-    max_val_steps_per_epoch = 25
+    start_epoch = 50
+    if checkpoint_path is not None and os.path.exists(checkpoint_path):
+        print(f"Loading checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path)
+
+        # If you saved them as a dictionary:
+        model.load_state_dict(checkpoint) #['model']
+        # optimizer.load_state_dict(checkpoint['optimizer'])
+        # scheduler.load_state_dict(checkpoint['scheduler'])
+        start_epoch = start_epoch
+        print(f"Resuming training from epoch {start_epoch + 1}")
 
     # ---- training! ----- #
-    for epoch in range(0, 500):
+    for epoch in range(start_epoch, max_epoch):
         model.train()
 
         running_loss = 0.0
@@ -137,6 +167,7 @@ def train():
             if i == 0 and epoch == 0:
                 print(f"inputs shape, type:       {inputs.shape} , {inputs.dtype}")
                 print(f"sheet_labels shape, type: {sheet_labels.shape}, {sheet_labels.dtype}")
+                print(f"sheet_label values: {torch.unique(sheet_labels)}")
                 print(f"normal_labels shape, type:{normal_labels.shape}, {normal_labels.dtype}")
                 print(f"affinity_labels shape, type:{affinity_labels.shape}, {affinity_labels.dtype}")
 
@@ -206,9 +237,9 @@ def train():
         print(
             f'\End of Epoch {epoch + 1} | Average Sheet Loss: {epoch_avg_sheet_loss:.4f} | Average Normal Loss: {epoch_avg_normal_loss:.4f} | Average Affinity Loss: {epoch_avg_affinity_loss:.4f} | Average Loss: {epoch_avg_loss}\n'
         )
-        torch.save(model.state_dict(), f'{model_name}_{epoch + 1}.pth')
-        torch.save(optimizer.state_dict(), f'{model_name}_{epoch + 1}_optimizer.pth')
-        torch.save(scheduler.state_dict(), f'{model_name}_{epoch + 1}_scheduler.pth')
+        torch.save(model.state_dict(), f'{ckpt_out_base}/{model_name}_{epoch + 1}.pth')
+        torch.save(optimizer.state_dict(), f'{ckpt_out_base}/{model_name}_{epoch + 1}_optimizer.pth')
+        torch.save(scheduler.state_dict(), f'{ckpt_out_base}/{model_name}_{epoch + 1}_scheduler.pth')
 
         # ---- validation ----- #
         if epoch % 1 == 0:
@@ -268,7 +299,7 @@ def train():
             print(
                 f'\nEnd of Epoch: {epoch + 1}, Val Average Sheet Loss: {epoch_val_avg_sheet_loss:.8f}, Val Average Normal Loss: {epoch_val_avg_normal_loss:.8f}, Val Average Affinity Loss: {epoch_val_avg_affinity_loss:.8f}, Val Average Loss: {epoch_val_avg_loss:.8f}\n')
 
-            scheduler.step(epoch_val_avg_loss)
+            scheduler.step()
 
     print('Training Finished!')
     torch.save(model.state_dict(), f'{model_name}_final.pth')

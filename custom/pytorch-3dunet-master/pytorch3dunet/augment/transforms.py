@@ -823,9 +823,9 @@ class RicianNoiseTransform:
 class BlankRectangleTransform:
     def __init__(self, random_state,
                  min_size=(10, 10, 10),
-                 max_size=(30, 30, 30),
-                 num_rectangles=(1, 3),
-                 value_range=(0.0, 0.2),
+                 max_size=(60, 60, 60),
+                 num_rectangles=(1, 4),
+                 value_range=(0.1, 0.5),
                  execution_probability=0.5):
         self.random_state = random_state
         self.min_size = np.array(min_size)

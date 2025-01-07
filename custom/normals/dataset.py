@@ -12,6 +12,8 @@ from pytorch3dunet.augment.transforms import (
 from tqdm import tqdm
 import multiprocessing
 import json
+from skimage.morphology import dilation, ball
+from multiprocessing import Pool
 
 def ct_normalize(volume, clip_min, clip_max, global_mean, global_std):
     """
@@ -59,19 +61,65 @@ def _chunker(seq, chunk_size):
     for pos in range(0, len(seq), chunk_size):
         yield seq[pos:pos + chunk_size]
 
-def _check_patch_chunk(chunk, sheet_label, patch_size, min_labeled_ratio):
+def compute_bounding_box_3d(mask):
     """
-    Worker function: given a list of (z, y, x) and shared parameters,
-    return only those positions that meet the min_labeled_ratio criterion.
+    Given a 3D boolean array (True where labeled, False otherwise),
+    returns (minz, maxz, miny, maxy, minx, maxx).
+    If there are no nonzero elements, returns None.
+    """
+    nonzero_coords = np.argwhere(mask)
+    if nonzero_coords.size == 0:
+        return None
+
+    minz, miny, minx = nonzero_coords.min(axis=0)
+    maxz, maxy, maxx = nonzero_coords.max(axis=0)
+    return (minz, maxz, miny, maxy, minx, maxx)
+
+
+def bounding_box_volume(bbox):
+    """
+    Given a bounding box (minz, maxz, miny, maxy, minx, maxx),
+    returns the volume (number of voxels) inside the box.
+    """
+    minz, maxz, miny, maxy, minx, maxx = bbox
+    return ((maxz - minz + 1) *
+            (maxy - miny + 1) *
+            (maxx - minx + 1))
+
+
+def _check_patch_chunk(chunk, sheet_label, patch_size, bbox_threshold=0.5, label_threshold=0.05):
+    """
+    Worker function to check each patch in 'chunk' with both:
+      - bounding box coverage >= bbox_threshold
+      - overall labeled voxel ratio >= label_threshold
     """
     pD, pH, pW = patch_size
     valid_positions = []
+
     for (z, y, x) in chunk:
         patch = sheet_label[z:z + pD, y:y + pH, x:x + pW]
-        # Check ratio of >0 vs. total
-        if np.sum(patch > 0) / patch.size >= min_labeled_ratio:
-            valid_positions.append((z, y, x))
+        # Compute bounding box of nonzero pixels in this patch
+        bbox = compute_bounding_box_3d(patch > 0)
+        if bbox is None:
+            # No nonzero voxels at all -> skip
+            continue
+
+        # 1) Check bounding box coverage
+        bb_vol = bounding_box_volume(bbox)
+        patch_vol = patch.size  # pD * pH * pW
+        if bb_vol / patch_vol < bbox_threshold:
+            continue
+
+        # 2) Check overall labeled fraction
+        labeled_ratio = np.count_nonzero(patch) / patch_vol
+        if labeled_ratio < label_threshold:
+            continue
+
+        # If we passed both checks, add to valid positions
+        valid_positions.append((z, y, x))
+
     return valid_positions
+
 
 def find_label_bounding_box(sheet_label_array,
                             chunk_shape=(192, 192, 192)) -> tuple:
@@ -137,43 +185,6 @@ def find_label_bounding_box(sheet_label_array,
     # If maxz remains -1, that means no non-zero voxel was found at all
     return (minz, maxz, miny, maxy, minx, maxx)
 
-def _estimate_single_patch_memory(self):
-    """
-    Estimate (in MB) the memory usage for a single patch
-    (image + label + normals + affinity maps) in float32.
-
-    This is a naive calculation that assumes:
-      - image is (1, Z, Y, X)
-      - label is (1, Z, Y, X)
-      - normals is (3, Z, Y, X)
-      - affinity is (n_offsets, Z, Y, X)
-      - float32 => 4 bytes per element
-    """
-    bytes_per_float = 4  # float32
-    Z, Y, X = self.patch_size
-
-    # --- Image: shape = (1, Z, Y, X)
-    image_size = 1 * Z * Y * X
-
-    # --- Label: shape = (1, Z, Y, X)
-    label_size = 1 * Z * Y * X
-
-    # --- Normals: shape = (3, Z, Y, X)
-    normals_size = 3 * Z * Y * X
-
-    # --- Affinity: shape = (#_offsets, Z, Y, X)
-    # For example, if we have xy_offsets=[1,3,6] => 3 offsets in xy
-    # and z_offsets=[1,3,6] => 3 offsets in z,
-    # total offsets = 6 => shape = (6, Z, Y, X)
-    num_offsets = len(self.xy_offsets) + len(self.z_offsets)
-    affinity_size = num_offsets * Z * Y * X
-
-    total_elements = image_size + label_size + normals_size + affinity_size
-    total_bytes = total_elements * bytes_per_float
-    total_mb = total_bytes / (1024**2)
-
-    return total_mb
-
 class ZarrSegmentationDataset3D(Dataset):
     def __init__(self,
                  volume_path: Path,
@@ -198,8 +209,7 @@ class ZarrSegmentationDataset3D(Dataset):
         self.cache_file = cache_file
         self.use_cache = use_cache
 
-        estimated_mb = self._estimate_single_patch_memory()
-        print(f"[INFO] Approx. single-patch GPU memory usage (float32): {estimated_mb:.2f} MB")
+
 
         # open up our zarr arrays
         print(f"Opening arrays from {volume_path} and {sheet_label_path} and {normals_path}...")
@@ -293,104 +303,78 @@ class ZarrSegmentationDataset3D(Dataset):
                 with open(self.cache_file, 'w') as f:
                     json.dump(self.valid_patches, f)
 
-    def _estimate_single_patch_memory(self):
+    def _find_valid_patches(self,
+                            bbox_threshold=0.97,  # bounding-box coverage fraction
+                            label_threshold=0.10,  # minimum % of voxels labeled
+                            num_workers=16):
         """
-        Estimate (in MB) the memory usage for a single patch
-        (image + label + normals + affinity maps) in float32.
-
-        This is a naive calculation that assumes:
-          - image is (1, Z, Y, X)
-          - label is (1, Z, Y, X)
-          - normals is (3, Z, Y, X)
-          - affinity is (n_offsets, Z, Y, X)
-          - float32 => 4 bytes per element
+        Finds patches that contain:
+          - a bounding box of labeled voxels >= bbox_threshold fraction of the patch volume
+          - an overall labeled voxel fraction >= label_threshold
         """
-        bytes_per_float = 4  # float32
-        Z, Y, X = self.patch_size
-
-        # --- Image: shape = (1, Z, Y, X)
-        image_size = 1 * Z * Y * X
-
-        # --- Label: shape = (1, Z, Y, X)
-        label_size = 1 * Z * Y * X
-
-        # --- Normals: shape = (3, Z, Y, X)
-        normals_size = 3 * Z * Y * X
-
-        # --- Affinity: shape = (#_offsets, Z, Y, X)
-        # For example, if we have xy_offsets=[1,3,6] => 3 offsets in xy
-        # and z_offsets=[1,3,6] => 3 offsets in z,
-        # total offsets = 6 => shape = (6, Z, Y, X)
-        num_offsets = len(self.xy_offsets) + len(self.z_offsets)
-        affinity_size = num_offsets * Z * Y * X
-
-        total_elements = image_size + label_size + normals_size + affinity_size
-        total_bytes = total_elements * bytes_per_float
-        total_mb = total_bytes / (1024 ** 2)
-
-        return total_mb
-
-    def _find_valid_patches(self, num_workers=12):
+        # Decide which volume to use as reference
         if self._is_single_volume:
             sheet_label = self.sheet_label_array
         else:
-            # Use the 0-th volume as reference
             sheet_label = self.sheet_label_array[0]
-
-        print(f"finding bounding box for all labels in reference volume...")
-        # find the bounding box that contains all labels
-        bb = find_label_bounding_box(sheet_label)
-        minz, maxz, miny, maxy, minx, maxx = bb
-        print("Bounding box of labeled region:", bb)
 
         pD, pH, pW = self.patch_size
 
-        # generate all potential (Z, Y, X) positions
+        # 1. bounding box (outer) on the reference label array
+        minz, maxz, miny, maxy, minx, maxx = find_label_bounding_box(sheet_label)
+
+        # 2. generate possible start positions
+        z_step = pD // 2
+        y_step = pH // 2
+        x_step = pW // 2
         all_positions = []
-        for z in range(minz, maxz - pD + 2, pD // 2):
-            for y in range(miny, maxy - pH + 2, pH // 2):
-                for x in range(minx, maxx - pW + 2, pW // 2):
+        for z in range(minz, maxz - pD + 2, z_step):
+            for y in range(miny, maxy - pH + 2, y_step):
+                for x in range(minx, maxx - pW + 2, x_step):
                     all_positions.append((z, y, x))
 
-        total_positions = len(all_positions)
-        print("Number of potential patch positions:", total_positions)
-
-        # chunk out the checking
-        chunk_size = max(1, total_positions // (num_workers * 2))
+        # 3. parallel checking
+        chunk_size = max(1, len(all_positions) // (num_workers * 2))
         position_chunks = list(_chunker(all_positions, chunk_size))
 
+        print(
+            f"Finding valid patches of size: {self.patch_size} "
+            f"with bounding box coverage >= {bbox_threshold} and labeled fraction >= {label_threshold}."
+        )
+
         valid_positions_ref = []
-        with multiprocessing.Pool(processes=num_workers) as pool:
-            async_results = []
-            for chunk in position_chunks:
-                async_results.append(pool.apply_async(
+        with Pool(processes=num_workers) as pool:
+            results = [
+                pool.apply_async(
                     _check_patch_chunk,
-                    (chunk, sheet_label, self.patch_size, self.min_labeled_ratio)
-                ))
+                    (
+                        chunk,
+                        sheet_label,
+                        self.patch_size,
+                        bbox_threshold,  # pass bounding box threshold
+                        label_threshold  # pass label fraction threshold
+                    )
+                )
+                for chunk in position_chunks
+            ]
+            for r in tqdm(results, desc="Checking patches", total=len(results)):
+                valid_positions_ref.extend(r.get())
 
-            for r in tqdm(async_results, desc="Checking reference patches", total=len(async_results)):
-                valid_positions_ref.extend(r.get())  # gather results
-
-        # if single volume just store them, otherwise replicate for each volume
-        self.valid_patches = []
+        # 4. replicate if multi-volume
+        valid_patches = []
         if self._is_single_volume:
             for (z, y, x) in valid_positions_ref:
-                self.valid_patches.append({
-                    'volume_idx': 0,
-                    'start_pos': [z, y, x]  # store as list for JSON
-                })
+                valid_patches.append({'volume_idx': 0, 'start_pos': [z, y, x]})
         else:
             for volume_idx in range(self.n_volumes):
                 for (z, y, x) in valid_positions_ref:
-                    self.valid_patches.append({
-                        'volume_idx': volume_idx,
-                        'start_pos': [z, y, x]
-                    })
+                    valid_patches.append({'volume_idx': volume_idx, 'start_pos': [z, y, x]})
 
-        print(f"Found {len(valid_positions_ref)} valid patches in the reference volume.")
-        print(f"Replicated to total of {len(self.valid_patches)} valid patches "
-              f"across {self.n_volumes} volume(s).")
-
+        self.valid_patches = valid_patches
+        print(
+            f"Found {len(valid_positions_ref)} valid patches in reference volume. "
+            f"Total {len(self.valid_patches)} across all volumes."
+        )
 
     def __len__(self):
         return len(self.valid_patches)
@@ -410,7 +394,7 @@ class ZarrSegmentationDataset3D(Dataset):
             volume_data = self.volume_array[volume_idx][patch_slice]
 
         images = volume_data.astype(np.float32)
-        images /= 257.0  # now in [0..255]
+        images /= 255.0
         images = ct_normalize(
             images,
             clip_min=43.0,
@@ -427,6 +411,10 @@ class ZarrSegmentationDataset3D(Dataset):
 
         # normalize to 0, 1
         sheet_label /= 255.0
+        sheet_label = (sheet_label > 0).astype(bool)
+        kern = ball(radius=1)  # applying a very tiny dilation to my labels as the model is having a hard time
+        sheet_label = dilation(sheet_label, kern)
+        sheet_label=sheet_label.astype(np.float32)
 
         # --- Normals data ---
         if self._is_single_volume:
