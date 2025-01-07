@@ -192,8 +192,8 @@ class ZarrSegmentationDataset3D(Dataset):
                  normals_path: Path,
                  patch_size=(128, 128, 128),
                  min_labeled_ratio=0.8,
-                 xy_offsets=[1, 3, 6],
-                 z_offsets=[1, 3, 6],
+                 xy_offsets=None,
+                 z_offsets=None,
                  transforms_list=None,
                  cache_file: Path = None,
                  use_cache: bool = True
@@ -204,8 +204,12 @@ class ZarrSegmentationDataset3D(Dataset):
         self.normals_path = normals_path
         self.patch_size = patch_size
         self.min_labeled_ratio = min_labeled_ratio
+
         self.xy_offsets = xy_offsets
         self.z_offsets = z_offsets
+        self.use_affinities = (xy_offsets is not None) and (z_offsets is not None)
+
+
         self.cache_file = cache_file
         self.use_cache = use_cache
 
@@ -226,17 +230,20 @@ class ZarrSegmentationDataset3D(Dataset):
         # set zscore as our standardization scheme, same to all chans
         self.standardizer = Standardize(channelwise=False)
 
-        # set up our affinity transform
-        self.affinity_transform = LabelToAffinities(
-            offsets=xy_offsets,
-            z_offsets=z_offsets,
-            append_label=False,
-            aggregate_affinities=False
-        )
-        print("AffinityTransform parameters:")
-        print(f"  z_offsets = {self.affinity_transform.z_offsets}")
-        print(f"  append_label = {self.affinity_transform.append_label}")
-        print(f"  aggregate_affinities = {self.affinity_transform.aggregate_affinities}")
+        # If we're using affinities, create the transform; otherwise set to None
+        if self.use_affinities:
+            self.affinity_transform = LabelToAffinities(
+                offsets=xy_offsets,
+                z_offsets=z_offsets,
+                append_label=False,
+                aggregate_affinities=False
+            )
+            print("AffinityTransform parameters:")
+            print(f"  xy_offsets = {xy_offsets}")
+            print(f"  z_offsets = {z_offsets}")
+        else:
+            self.affinity_transform = None
+
 
         # gather transforms with their targets and probabilities
         if transforms_list:
@@ -437,39 +444,53 @@ class ZarrSegmentationDataset3D(Dataset):
         # valid = (magnitudes > 0)
         # normals[valid] /= magnitudes[valid, np.newaxis]
 
-        # ---- Affinity maps ------
-        affinity_maps = self.affinity_transform(sheet_label)
+        # --- Affinity maps (optional) ---
+        if self.use_affinities and self.affinity_transform is not None:
+            affinity_maps = self.affinity_transform(sheet_label)
+        else:
+            affinity_maps = None
 
         # add a dimension just so i can stop trying to deal with 3d v 4d in transforms
         images = images[np.newaxis, ...]  # (Z, Y, X) -> (1, Z, Y, X)
         sheet_label = sheet_label[np.newaxis, ...]  # (Z, Y, X) -> (1, Z, Y, X)
 
-        # ------ augs -------
+        # --- augs --- #
         if self.transforms:
             data_dict = {
                 'image': images,
                 'sheet_label': sheet_label,
-                'normals': normals,
-                'affinity': affinity_maps
+                'normals': normals
             }
+            if self.use_affinities and affinity_maps is not None:
+                data_dict['affinity'] = affinity_maps
+
             data_dict = self.transforms(data_dict)
+
             images = data_dict['image']
             sheet_label = data_dict['sheet_label']
             normals = data_dict['normals']
-            affinity_maps = data_dict['affinity']
+            if self.use_affinities and 'affinity' in data_dict:
+                affinity_maps = data_dict['affinity']
 
-        # convert to tensors
+        # --- Convert to torch tensors ---
         images = torch.from_numpy(np.ascontiguousarray(images))
         sheet_label = torch.from_numpy(np.ascontiguousarray(sheet_label))
         normals = torch.from_numpy(np.ascontiguousarray(normals))
-        affinity_maps = torch.from_numpy(np.ascontiguousarray(affinity_maps))
 
+        if self.use_affinities and affinity_maps is not None:
+            affinity_maps = torch.from_numpy(np.ascontiguousarray(affinity_maps))
+        else:
+            affinity_maps = None
+
+        if self.use_affinities:
+            return images, sheet_label, normals, affinity_maps
+        else:
+            return images, sheet_label, normals
         # now doing this before augs
         # images = images.unsqueeze(0)  # (Z, Y, X) => (1, Z, Y, X) or (1, Z, Y, X, C)
         # sheet_label = sheet_label.unsqueeze(0)  # (Z, Y, X) => (1, Z, Y, X)
 
 
-        return images, sheet_label, normals, affinity_maps
 
     def close(self):
         """Close the Zarr arrays."""

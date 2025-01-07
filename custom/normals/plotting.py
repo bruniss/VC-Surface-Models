@@ -4,7 +4,7 @@ import numpy as np
 import torch
 from pathlib import Path
 
-def save_debug_gif(input_volume, sheet_truth, normal_truth, affinity_truth, outputs, save_prefix="evals/img"):
+def save_debug_gif(input_volume, sheet_truth, normal_truth, outputs, save_prefix="evals/img"):
     """
     Creates a GIF with 8 panels (2 rows x 4 columns) per slice Z:
       Top row:    [ input, sheet_truth, normals_truth, affinity_truth ]
@@ -21,12 +21,12 @@ def save_debug_gif(input_volume, sheet_truth, normal_truth, affinity_truth, outp
         # ---------------------------------------------------------------------
         sheet_pred = torch.sigmoid(outputs['sheet']).squeeze().cpu().numpy()       # (Z, Y, X)
         normal_pred = outputs['normals'].squeeze().cpu().numpy()                  # (3, Z, Y, X)
-        affinity_pred = torch.sigmoid(outputs['affinities']).squeeze().cpu().numpy()  # (C, Z, Y, X)
+        # affinity_pred = torch.sigmoid(outputs['affinities']).squeeze().cpu().numpy()  # (C, Z, Y, X)
 
         input_volume = input_volume.squeeze().cpu().numpy()   # (Z, Y, X)
         sheet_truth = sheet_truth.squeeze().cpu().numpy()     # (Z, Y, X)
         normal_truth = normal_truth.squeeze().cpu().numpy()   # (3, Z, Y, X)
-        affinity_truth = affinity_truth.squeeze().cpu().numpy()   # (C, Z, Y, X)
+        # affinity_truth = affinity_truth.squeeze().cpu().numpy()   # (C, Z, Y, X)
 
         # ---------------------------------------------------------------------
         # 2) (Optional) Normalize normal vectors to unit-length if desired
@@ -70,14 +70,14 @@ def save_debug_gif(input_volume, sheet_truth, normal_truth, affinity_truth, outp
             slice_normals_truth = np.transpose(nt_mapped, (1, 2, 0))  # => (Y, X, 3) for display
 
             # (D) Affinity truth => e.g. show channel 0 => shape (Y, X)
-            slice_aff_truth = (affinity_truth[0, z, ...] * 255).clip(0, 255).astype(np.uint8)
-            slice_aff_truth_bgr = cv2.cvtColor(slice_aff_truth, cv2.COLOR_GRAY2BGR)
+            #slice_aff_truth = (affinity_truth[0, z, ...] * 255).clip(0, 255).astype(np.uint8)
+            #slice_aff_truth_bgr = cv2.cvtColor(slice_aff_truth, cv2.COLOR_GRAY2BGR)
 
             top_row = np.hstack([
                 slice_input_bgr,
                 slice_sheet_truth_bgr,
-                slice_normals_truth,
-                slice_aff_truth_bgr
+                slice_normals_truth
+                #slice_aff_truth_bgr
             ])
 
             # ~~~~~~~~~ BOTTOM ROW ~~~~~~~~~
@@ -99,14 +99,14 @@ def save_debug_gif(input_volume, sheet_truth, normal_truth, affinity_truth, outp
             slice_sheet_pred_bgr = cv2.cvtColor(slice_sheet_pred, cv2.COLOR_GRAY2BGR)
 
             # (G) Affinity prediction => e.g. channel 0
-            slice_aff_pred = (affinity_pred[0, z, ...] * 255).clip(0, 255).astype(np.uint8)
-            slice_aff_pred_bgr = cv2.cvtColor(slice_aff_pred, cv2.COLOR_GRAY2BGR)
+            #slice_aff_pred = (affinity_pred[0, z, ...] * 255).clip(0, 255).astype(np.uint8)
+            #slice_aff_pred_bgr = cv2.cvtColor(slice_aff_pred, cv2.COLOR_GRAY2BGR)
 
             bottom_row = np.hstack([
                 slice_normals_abs_bgr,
                 slice_sheet_pred_bgr,
-                slice_normals_pred_bgr,
-                slice_aff_pred_bgr
+                slice_normals_pred_bgr
+                #slice_aff_pred_bgr
             ])
 
             # Stack rows

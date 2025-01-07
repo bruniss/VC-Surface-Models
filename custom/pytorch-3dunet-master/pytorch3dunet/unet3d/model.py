@@ -248,8 +248,8 @@ class MultiTaskResidualUNetSE3D(ResidualUNetSE3D):
                  sheet_channels=1,  # Usually 1 for binary segmentation
                  normal_channels=3, # 3 for XYZ normals
                  affinity_channels=None,  # Will be set based on number of offsets
-                 xy_offsets=[1, 3, 9, 27],  # Example offsets for affinities
-                 z_offsets=[1, 3, 9, 27],
+                 xy_offsets=None,  # Example offsets for affinities
+                 z_offsets=None,
                  final_sigmoid=True,
                  f_maps=[32, 64, 128, 256, 320, 320, 320],
                  layer_order='gcr',
@@ -260,10 +260,18 @@ class MultiTaskResidualUNetSE3D(ResidualUNetSE3D):
                  upsample='default',
                  dropout_prob=0.1):
 
-        # Calculate total affinity channels: 3 directions per offset
-        if affinity_channels is None:
-            # 6 directions (±x, ±y, ±z) per offset
-            affinity_channels = 6 * len(xy_offsets)
+        self.use_affinities = (
+                affinity_channels is not None and
+                xy_offsets is not None and
+                z_offsets is not None
+        )
+
+        if self.use_affinities:
+            # If affinity_channels was explicitly None, but xy_offsets/z_offsets are not,
+            # compute it based on offsets
+            if affinity_channels is None:
+                # 6 directions (±x, ±y, ±z) per offset
+                affinity_channels = 6 * len(xy_offsets)
 
         # Initialize parent ResidualUNetSE3D
         super().__init__(
@@ -286,12 +294,12 @@ class MultiTaskResidualUNetSE3D(ResidualUNetSE3D):
         self.task_final_convs = nn.ModuleDict()
         self.task_activations = nn.ModuleDict()
 
-        # Define output channels for each task
         out_channels_dict = {
             'sheet': sheet_channels,
-            'normals': normal_channels,
-            'affinities': affinity_channels
+            'normals': normal_channels
         }
+        if self.use_affinities:
+            out_channels_dict['affinities'] = affinity_channels
 
         self.f_maps  = f_maps
 

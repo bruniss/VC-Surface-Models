@@ -4,6 +4,15 @@ import torch.nn.functional as F
 
 # BCE/Dice, Dice , GDL, abstract dice, per channel dice, masking loss wrapper from pytorch3dunet
 
+def label_smooth(target, smooth_factor: float):
+    """
+    Applies label smoothing for binary targets:
+        1 -> 1 - smooth_factor
+        0 -> smooth_factor
+    """
+    # target is expected to be either 0 or 1
+    # clamp to protect from any rounding or floating issues
+    return target * (1 - smooth_factor) + (1 - target) * smooth_factor
 
 def compute_per_channel_dice(input, target, epsilon=1e-6, weight=None):
     """
@@ -80,19 +89,17 @@ class SkipLastTargetChannelWrapper(nn.Module):
             return self.loss(input, target, weight)
         return self.loss(input, target)
 
+
 class _AbstractDiceLoss(nn.Module):
     """
     Base class for different implementations of Dice loss.
     """
 
-    def __init__(self, weight=None, normalization='sigmoid'):
+    def __init__(self, weight=None, normalization='sigmoid', smooth_factor=0.0):
         super(_AbstractDiceLoss, self).__init__()
         self.register_buffer('weight', weight)
-        # The output from the network during training is assumed to be un-normalized probabilities and we would
-        # like to normalize the logits. Since Dice (or soft Dice in this case) is usually used for binary data,
-        # normalizing the channels with Sigmoid is the default choice even for multi-class segmentation problems.
-        # However if one would like to apply Softmax in order to get the proper probability distribution from the
-        # output, just specify `normalization=Softmax`
+        self.smooth_factor = smooth_factor
+
         assert normalization in ['sigmoid', 'softmax', 'none']
         if normalization == 'sigmoid':
             self.normalization = nn.Sigmoid()
@@ -109,10 +116,12 @@ class _AbstractDiceLoss(nn.Module):
         # get probabilities from logits
         input = self.normalization(input)
 
-        # compute per channel Dice coefficient
+        # Optionally apply label smoothing for binary segmentation
+        if self.smooth_factor > 0.0:
+            target = label_smooth(target, self.smooth_factor)
+
         per_channel_dice = self.dice(input, target, weight=self.weight)
 
-        # average Dice score across all channels/classes
         return 1. - torch.mean(per_channel_dice)
 
 
@@ -175,13 +184,52 @@ def normal_cosine_loss(pred, target):
     cos_sim = F.cosine_similarity(pred, target, dim=1, eps=1e-8)
     return 1.0 - cos_sim.mean()
 
+def masked_cosine_loss(pred, target):
+    """
+    pred:   [B, 3, D, H, W] predicted normals
+    target: [B, 3, D, H, W] ground-truth normals
+    We derive a mask from target by checking which normals are nonzero.
+    """
+
+    mag = torch.norm(target, dim=1)         # [B, D, H, W]
+    mask = (mag > 1e-6).float()             # [B, D, H, W]
+    cos_sim = F.cosine_similarity(pred, target, dim=1, eps=1e-8)  # [B, D, H, W]
+    cos_sim_masked = cos_sim * mask
+    valid_count = mask.sum() + 1e-8
+    mean_cos_sim = cos_sim_masked.sum() / valid_count
+
+    return 1.0 - mean_cos_sim
+
+class BCEWithLogitsLossLabelSmoothing(nn.Module):
+    def __init__(self, smoothing=0.1, reduction='mean'):
+        """
+        :param smoothing: float, how much to move 0 -> alpha, and 1 -> 1 - alpha
+        :param reduction: 'mean' or 'sum' or 'none', same as BCEWithLogitsLoss
+        """
+        super().__init__()
+        self.smoothing = smoothing
+        self.criterion = nn.BCEWithLogitsLoss(reduction=reduction)
+
+    def forward(self, logits, targets):
+        """
+        :param logits: model outputs [B, ..., D, H, W]
+        :param targets: ground truth, in {0,1}, same shape as logits
+        """
+        with torch.no_grad():
+            # Label smoothing:
+            # For each target y in {0,1}, smoothed_y = y*(1 - 2*alpha) + alpha
+            smoothed_targets = targets * (1.0 - 2.0 * self.smoothing) + self.smoothing
+
+        loss = self.criterion(logits, smoothed_targets)
+        return loss
+
 class BCEDiceLoss(nn.Module):
     """Linear combination of BCE and Dice losses"""
 
     def __init__(self, alpha, beta):
         super(BCEDiceLoss, self).__init__()
         self.alpha = alpha
-        self.bce = nn.BCEWithLogitsLoss()
+        self.bce = BCEWithLogitsLossLabelSmoothing(smoothing=0.1, reduction='mean')
         self.beta = beta
         self.dice = DiceLoss()
 
