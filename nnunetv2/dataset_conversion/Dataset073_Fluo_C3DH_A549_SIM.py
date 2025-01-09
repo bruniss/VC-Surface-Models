@@ -73,7 +73,7 @@ if __name__ == '__main__':
         '.tif'
     )
 
-    # custom split to ensure we are stratifying properly. This dataset only has 2 folds
+    # models split to ensure we are stratifying properly. This dataset only has 2 folds
     caseids = [i[:-4] for i in subfiles(labelstr, suffix='.tif', join=False)]
     splits = []
     splits.append(

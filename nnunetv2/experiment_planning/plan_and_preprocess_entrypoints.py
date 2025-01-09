@@ -38,18 +38,18 @@ def plan_experiment_entry():
                              '\'ExperimentPlanner\'. Note: There is no longer a distinction between 2d and 3d planner. '
                              'It\'s an all in one solution now. Wuch. Such amazing.')
     parser.add_argument('-gpu_memory_target', default=None, type=float, required=False,
-                        help='[OPTIONAL] DANGER ZONE! Sets a custom GPU memory target (in GB). Default: None (=Planner '
+                        help='[OPTIONAL] DANGER ZONE! Sets a models GPU memory target (in GB). Default: None (=Planner '
                              'class default is used). Changing this will '
                              'affect patch and batch size and will '
                              'definitely affect your models performance! Only use this if you really know what you '
                              'are doing and NEVER use this without running the default nnU-Net first as a baseline.')
     parser.add_argument('-preprocessor_name', default='DefaultPreprocessor', type=str, required=False,
-                        help='[OPTIONAL] DANGER ZONE! Sets a custom preprocessor class. This class must be located in '
+                        help='[OPTIONAL] DANGER ZONE! Sets a models preprocessor class. This class must be located in '
                              'nnunetv2.preprocessing. Default: \'DefaultPreprocessor\'. Changing this may affect your '
                              'models performance! Only use this if you really know what you '
                              'are doing and NEVER use this without running the default nnU-Net first (as a baseline).')
     parser.add_argument('-overwrite_target_spacing', default=None, nargs='+', required=False,
-                        help='[OPTIONAL] DANGER ZONE! Sets a custom target spacing for the 3d_fullres and 3d_cascade_fullres '
+                        help='[OPTIONAL] DANGER ZONE! Sets a models target spacing for the 3d_fullres and 3d_cascade_fullres '
                              'configurations. Default: None [no changes]. Changing this will affect image size and '
                              'potentially patch and batch '
                              'size. This will definitely affect your models performance! Only use this if you really '
@@ -60,7 +60,7 @@ def plan_experiment_entry():
                         help='[OPTIONAL] DANGER ZONE! If you used -gpu_memory_target, -preprocessor_name or '
                              '-overwrite_target_spacing it is best practice to use -overwrite_plans_name to generate a '
                              'differently named plans file such that the nnunet default plans are not '
-                             'overwritten. You will then need to specify your custom plans file with -p whenever '
+                             'overwritten. You will then need to specify your models plans file with -p whenever '
                              'running other nnunet commands (training, inference etc)')
     args, unrecognized_args = parser.parse_known_args()
     plan_experiments(args.d, args.pl, args.gpu_memory_target, args.preprocessor_name, args.overwrite_target_spacing,
@@ -74,7 +74,7 @@ def preprocess_entry():
                         help="[REQUIRED] List of dataset IDs. Example: 2 4 5. This will run fingerprint extraction, experiment "
                              "planning and preprocessing for these datasets. Can of course also be just one dataset")
     parser.add_argument('-plans_name', default='nnUNetPlans', required=False,
-                        help='[OPTIONAL] You can use this to specify a custom plans file that you may have generated')
+                        help='[OPTIONAL] You can use this to specify a models plans file that you may have generated')
     parser.add_argument('-c', required=False, default=['2d', '3d_fullres', '3d_lowres'], nargs='+',
                         help='[OPTIONAL] Configurations for which the preprocessing should be run. Default: 2d 3d_fullres '
                              '3d_lowres. 3d_cascade_fullres does not need to be specified because it uses the data '
@@ -129,18 +129,18 @@ def plan_and_preprocess_entry():
                              '\'ExperimentPlanner\'. Note: There is no longer a distinction between 2d and 3d planner. '
                              'It\'s an all in one solution now. Wuch. Such amazing.')
     parser.add_argument('-gpu_memory_target', default=None, type=float, required=False,
-                        help='[OPTIONAL] DANGER ZONE! Sets a custom GPU memory target (in GB). Default: None (=Planner '
+                        help='[OPTIONAL] DANGER ZONE! Sets a models GPU memory target (in GB). Default: None (=Planner '
                              'class default is used). Changing this will '
                              'affect patch and batch size and will '
                              'definitely affect your models performance! Only use this if you really know what you '
                              'are doing and NEVER use this without running the default nnU-Net first as a baseline.')
     parser.add_argument('-preprocessor_name', default='DefaultPreprocessor', type=str, required=False,
-                        help='[OPTIONAL] DANGER ZONE! Sets a custom preprocessor class. This class must be located in '
+                        help='[OPTIONAL] DANGER ZONE! Sets a models preprocessor class. This class must be located in '
                              'nnunetv2.preprocessing. Default: \'DefaultPreprocessor\'. Changing this may affect your '
                              'models performance! Only use this if you really know what you '
                              'are doing and NEVER use this without running the default nnU-Net first (as a baseline).')
     parser.add_argument('-overwrite_target_spacing', default=None, nargs='+', required=False,
-                        help='[OPTIONAL] DANGER ZONE! Sets a custom target spacing for the 3d_fullres and 3d_cascade_fullres '
+                        help='[OPTIONAL] DANGER ZONE! Sets a models target spacing for the 3d_fullres and 3d_cascade_fullres '
                              'configurations. Default: None [no changes]. Changing this will affect image size and '
                              'potentially patch and batch '
                              'size. This will definitely affect your models performance! Only use this if you really '
@@ -152,7 +152,7 @@ def plan_and_preprocess_entry():
                              '-preprocessor_name or '
                              '-overwrite_target_spacing it is best practice to use -overwrite_plans_name to generate a '
                              'differently named plans file such that the nnunet default plans are not '
-                             'overwritten. You will then need to specify your custom plans file with -p whenever '
+                             'overwritten. You will then need to specify your models plans file with -p whenever '
                              'running other nnunet commands (training, inference etc)')
     parser.add_argument('-c', required=False, default=['2d', '3d_fullres', '3d_lowres'], nargs='+',
                         help='[OPTIONAL] Configurations for which the preprocessing should be run. Default: 2d 3d_fullres '

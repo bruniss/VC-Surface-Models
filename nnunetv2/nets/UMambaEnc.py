@@ -99,7 +99,7 @@ class ResidualMambaEncoder(nn.Module):
 
         pool_op = get_matching_pool_op(conv_op, pool_type=pool_type) if pool_type != 'conv' else None
 
-        # build a stem, Todo maybe we need more flexibility for this in the future. For now, if you need a custom
+        # build a stem, Todo maybe we need more flexibility for this in the future. For now, if you need a models
         #  stem you can just disable the stem and build your own.
         #  THE STEM DOES NOT DO STRIDE/POOLING IN THIS IMPLEMENTATION
         if not disable_default_stem:

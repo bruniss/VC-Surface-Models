@@ -147,7 +147,7 @@ class NexToU_Encoder(nn.Module):
         self.n_conv_stages = self.no_pool_gnn_stage_num - self.n_swin_gnn_stages
         self.opt.n_size_list = n_size_list
 
-        # build a stem, Todo maybe we need more flexibility for this in the future. For now, if you need a custom
+        # build a stem, Todo maybe we need more flexibility for this in the future. For now, if you need a models
         #  stem you can just disable the stem and build your own.
         #  THE STEM DOES NOT DO STRIDE/POOLING IN THIS IMPLEMENTATION
         if not disable_default_stem:

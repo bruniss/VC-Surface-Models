@@ -343,7 +343,7 @@ class nnUNetTrainer(object):
         training, so if you change the network architecture during training by deriving a new trainer class then
         inference will know about it).
 
-        If you need to know how many segmentation outputs your custom architecture needs to have, use the following snippet:
+        If you need to know how many segmentation outputs your models architecture needs to have, use the following snippet:
         > label_manager = plans_manager.get_label_manager(dataset_json)
         > label_manager.num_segmentation_heads
         (why so complicated? -> We can have either classical training (classes) or regions. If we have regions,

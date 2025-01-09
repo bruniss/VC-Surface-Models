@@ -113,7 +113,7 @@ class DistanceTransformExperimentPlanner(ExperimentPlanner):
 
         plans_file = join(nnUNet_preprocessed, self.dataset_name, self.plans_identifier + '.json')
 
-        # Avoid overwriting existing custom configurations every time this is executed.
+        # Avoid overwriting existing models configurations every time this is executed.
         if isfile(plans_file):
             old_plans = load_json(plans_file)
             old_configurations = old_plans['configurations']

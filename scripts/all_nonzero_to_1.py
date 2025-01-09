@@ -70,7 +70,7 @@ def apply_value_mapping(data, value_mapping=None):
 
 def process_tiff(input_path, output_path, value_mapping, check_values=None):
     """
-    Process a multipage TIFF file using a custom value mapping and check for missing values
+    Process a multipage TIFF file using a models value mapping and check for missing values
     
     Parameters:
     input_path (str): Path to input TIFF file

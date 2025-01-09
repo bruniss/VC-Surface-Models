@@ -91,7 +91,7 @@ def save_extracted_nifti_slice(image, ed_frame: int, es_frame: int, out_dir: Pat
 
 
 # ------------------------------------------------------------------------------
-# Create custom splits
+# Create models splits
 # ------------------------------------------------------------------------------
 def create_custom_splits(src_data_folder: Path, csv_file: str, dataset_id: int, num_val_patients: int = 25):
     existing_splits = os.path.join(nnUNet_preprocessed, f"Dataset{dataset_id}_MNMs", "splits_final.json")
@@ -149,9 +149,9 @@ if __name__ == "__main__":
         action="help",
         default=argparse.SUPPRESS,
         help="MNMs conversion utility helper. This script can be used to convert MNMs data into the expected nnUNet "
-        "format. It can also be used to create additional custom splits, for explicitly training on combinations "
-        "of vendors A and B (see `--custom-splits`).\n"
-        "If you wish to generate the custom splits, run the following pipeline:\n\n"
+        "format. It can also be used to create additional models splits, for explicitly training on combinations "
+        "of vendors A and B (see `--models-splits`).\n"
+        "If you wish to generate the models splits, run the following pipeline:\n\n"
         "(1) Run `Dataset114_MNMs -i <raw_Data_dir>\n"
         "(2) Run `nnUNetv2_plan_and_preprocess -d 114 --verify_dataset_integrity`\n"
         "(3) Start training, but stop after initial splits are created: `nnUNetv2_train 114 2d 0`\n"
@@ -179,7 +179,7 @@ if __name__ == "__main__":
         "--custom_splits",
         type=bool,
         default=False,
-        help="Whether to append custom splits for training and testing on different vendors. If True, will create "
+        help="Whether to append models splits for training and testing on different vendors. If True, will create "
         "splits for training on patients from vendors A, B or a mix of A and B. Splits are tested on a hold-out "
         "validation sets of patients from A, B or A and B combined. See section 2.4 and table 3 from "
         "https://arxiv.org/abs/2011.07592 for more info.",
@@ -189,7 +189,7 @@ if __name__ == "__main__":
     args.input_folder = Path(args.input_folder)
 
     if args.custom_splits:
-        print("Appending custom splits...")
+        print("Appending models splits...")
         create_custom_splits(args.input_folder, args.csv_file_name, args.dataset_id)
     else:
         print("Converting...")

@@ -545,7 +545,7 @@ class ExperimentPlanner(object):
 
         plans_file = join(nnUNet_preprocessed, self.dataset_name, self.plans_identifier + '.json')
 
-        # we don't want to overwrite potentially existing custom configurations every time this is executed. So let's
+        # we don't want to overwrite potentially existing models configurations every time this is executed. So let's
         # read the plans file if it already exists and keep any non-default configurations
         if isfile(plans_file):
             old_plans = load_json(plans_file)
