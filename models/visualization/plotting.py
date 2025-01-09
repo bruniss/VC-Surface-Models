@@ -5,7 +5,7 @@ import torch
 from pathlib import Path
 
 
-def log_predictions_as_video(self, writer, inputs, targets_dict, outputs, epoch):
+def log_predictions_as_video(writer, tasks, inputs, targets_dict, outputs, epoch):
     """
     Logs predicted volumes (and optionally targets) as video in TensorBoard.
     We treat the Depth dimension (D) as time frames for the video.
@@ -20,7 +20,7 @@ def log_predictions_as_video(self, writer, inputs, targets_dict, outputs, epoch)
     writer.add_video("val_input", inp_3d, epoch, fps=4)
 
     # For each task, log pred + label
-    for t_name in self.tasks:
+    for t_name in tasks:
         # Pred
         t_pred = outputs[t_name][batch_idx: batch_idx + 1].clone()
         # If it's a raw logit, maybe do a sigmoid if you want to see [0..1]

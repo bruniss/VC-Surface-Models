@@ -307,6 +307,7 @@ class BaseTrainer:
                                 # We'll log a video for each task's prediction + label
                                 log_predictions_as_video(
                                     writer,
+                                    self.tasks,
                                     inputs,
                                     targets_dict,
                                     outputs,
