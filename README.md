@@ -1,6 +1,6 @@
 # VC-Surface-Models
 
-All training data and model weights will be located here: https://dl.ash2txt.org/community-uploads/bruniss/p2-submission. Most training was done with a skeletonization based loss from MIC-DKFZ located here https://github.com/MIC-DKFZ/Skeleton-Recall. Some additional training was done using a distance transform weighted loss, with some info here: https://github.com/MIC-DKFZ/nnUNet/pull/2630
+All training data and model weights will be located here: https://dl.ash2txt.org/community-uploads/bruniss/p2_submission. Most training was done with a skeletonization based loss from MIC-DKFZ located here https://github.com/MIC-DKFZ/Skeleton-Recall. Some additional training was done using a distance transform weighted loss, with some info here: https://github.com/MIC-DKFZ/nnUNet/pull/2630
 
 Heavy additional augmentations during training in the form of elastic deformation, an inhomogeneous illumination transform, and blank rectangle transforms inspired by this repo : https://github.com/MIC-DKFZ/MurineAirwaySegmentation (if you cant tell yet i'm a huge fan of everything MIC-DKFZ does). 
 
